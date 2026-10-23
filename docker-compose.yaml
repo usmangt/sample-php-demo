@@ -1,0 +1,117 @@
+services:
+  # PHP Web Application
+  php-app:
+    image: php:8.2-apache
+    container_name: php-prometheus-app
+    ports:
+      - "8080:80"
+    user: "0:0"
+    volumes:
+      - ./src:/var/www/html
+      - ./logs:/var/log/app
+    environment:
+      - APACHE_DOCUMENT_ROOT=/var/www/html
+    command: >
+      bash -c "
+        mkdir -p /var/log/app &&
+        chmod 777 /var/log/app &&
+        apache2-foreground
+      "
+    networks:
+      - prometheus-network
+
+  # Prometheus Server
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: php-prometheus-server
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - prometheus-network
+
+  # Loki
+  loki:
+    image: grafana/loki:latest
+    container_name: php-prometheus-loki
+    ports:
+      - "3100:3100"
+    user: "0:0"
+    volumes:
+      - ./config/loki.yaml:/etc/loki/local-config.yaml
+      - loki_data:/tmp/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - prometheus-network
+
+  # Grafana Alloy
+  alloy:
+    image: grafana/alloy:latest
+    container_name: php-prometheus-alloy
+    volumes:
+      - ./config/alloy.yaml:/etc/alloy/config.alloy
+      - ./logs:/var/log/app:ro
+    ports:
+      - "12345:12345"
+    command:
+      - "run"
+      - "/etc/alloy/config.alloy"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+    depends_on:
+      - loki
+    networks:
+      - prometheus-network
+
+  # Grafana (Visualization)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: php-prometheus-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_FEATURE_TOGGLES_ENABLE=correlations
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+      - loki
+      - tempo  
+    networks:
+      - prometheus-network
+
+  # Tempo (Tracing)
+  tempo:
+    image: grafana/tempo:2.10.0
+    container_name: php-prometheus-tempo
+    user: "0:0"
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo.yaml
+      - tempo_data:/tmp/tempo
+    ports:
+      - "3200:3200"   # Tempo query / status API
+      - "4318:4318"   # OTLP HTTP (we will use this from CLI + PHP)
+      - "4317:4317"   # OTLP gRPC
+    networks:
+      - prometheus-network
+
+volumes:
+  prometheus_data:
+  loki_data:
+  grafana_data:
+  tempo_data:
+    
+networks:
+  prometheus-network:
+    driver: bridge

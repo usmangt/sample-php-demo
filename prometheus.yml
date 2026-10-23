@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # PHP Application Metrics - Direct from PHP app
+  - job_name: 'php-app'
+    static_configs:
+      - targets: ['php-app:80']
+    scrape_interval: 15s
+    metrics_path: '/metrics.php'
